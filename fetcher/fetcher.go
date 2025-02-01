@@ -2,11 +2,14 @@ package fetcher
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sitemap-checker/logger"
+	"strings"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -23,6 +26,13 @@ func InitRedis(redisURL string) {
 		Password: "", // Пароль, якщо потрібно
 		DB:       0,  // Номер бази даних
 	})
+
+	// Перевіряємо підключення до Redis
+	_, err := redisClient.Ping(context.Background()).Result()
+	if err != nil {
+		logger.Info("Redis недоступний, використовується тимчасовий файл для кешування")
+		redisClient = nil
+	}
 }
 
 // FetchSitemap завантажує sitemap.xml з вказаного URL
@@ -100,11 +110,20 @@ func FetchRobotsTxt(ctx context.Context, pageURL string) ([]byte, error) {
 
 	robotsURL := fmt.Sprintf("%s://%s/robots.txt", parsedURL.Scheme, parsedURL.Host)
 
-	// Перевіряємо кеш
-	cachedRobotsTxt, err := redisClient.Get(ctx, robotsURL).Bytes()
-	if err == nil {
-		logger.Info("robots.txt знайдено в кеші для: %s", robotsURL)
-		return cachedRobotsTxt, nil
+	// Якщо Redis доступний, використовуємо його
+	if redisClient != nil {
+		cachedRobotsTxt, err := redisClient.Get(ctx, robotsURL).Bytes()
+		if err == nil {
+			logger.Info("robots.txt знайдено в кеші для: %s", robotsURL)
+			return cachedRobotsTxt, nil
+		}
+	}
+
+	// Якщо Redis недоступний, використовуємо тимчасовий файл
+	tempFile := fmt.Sprintf("/tmp/robots_%x.txt", sha256.Sum256([]byte(robotsURL)))
+	if data, err := os.ReadFile(tempFile); err == nil {
+		logger.Info("robots.txt знайдено в тимчасовому файлі для: %s", robotsURL)
+		return data, nil
 	}
 
 	// Якщо немає в кеші, завантажуємо з мережі
@@ -133,13 +152,40 @@ func FetchRobotsTxt(ctx context.Context, pageURL string) ([]byte, error) {
 		return nil, fmt.Errorf("помилка при читанні тіла відповіді: %v", err)
 	}
 
-	// Зберігаємо в кеш
-	err = redisClient.Set(ctx, robotsURL, robotsTxt, 24*time.Hour).Err()
-	if err != nil {
-		logger.Error("помилка при збереженні robots.txt в кеш: %v", err)
+	// Зберігаємо в кеш або тимчасовий файл
+	if redisClient != nil {
+		err = redisClient.Set(ctx, robotsURL, robotsTxt, 24*time.Hour).Err()
+		if err != nil {
+			logger.Error("помилка при збереженні robots.txt в кеш: %v", err)
+		}
+	} else {
+		err = os.WriteFile(tempFile, robotsTxt, 0644)
+		if err != nil {
+			logger.Error("помилка при збереженні robots.txt у тимчасовий файл: %v", err)
+		}
 	}
 
 	return robotsTxt, nil
+}
+
+// CleanupTempFiles видаляє тимчасові файли robots.txt
+func CleanupTempFiles() {
+	files, err := os.ReadDir("/tmp")
+	if err != nil {
+		logger.Error("помилка при читанні тимчасових файлів: %v", err)
+		return
+	}
+
+	for _, file := range files {
+		if strings.HasPrefix(file.Name(), "robots_") {
+			err := os.Remove("/tmp/" + file.Name())
+			if err != nil {
+				logger.Error("помилка при видаленні тимчасового файлу: %v", err)
+			} else {
+				logger.Info("тимчасовий файл видалено: %s", file.Name())
+			}
+		}
+	}
 }
 
 // FetchPageWithTiming завантажує сторінку та вимірює час завантаження

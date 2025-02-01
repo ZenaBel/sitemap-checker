@@ -24,6 +24,7 @@ func main() {
 
 	// Ініціалізація Redis
 	fetcher.InitRedis(cfg.RedisURL)
+	defer fetcher.CleanupTempFiles() // Видаляємо тимчасові файли після завершення
 
 	// Контекст з таймаутом
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)

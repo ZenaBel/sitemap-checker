@@ -3,9 +3,11 @@ package checker
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,23 @@ import (
 	"sitemap-checker/fetcher"
 	"sitemap-checker/logger"
 	"sitemap-checker/parser"
+)
+
+// PageResult містить результати перевірки сторінки
+type PageResult struct {
+	URL                  string            `json:"url"`
+	StatusCode           int               `json:"status_code"`
+	Redirects            []string          `json:"redirects"`
+	CanonicalURL         string            `json:"canonical_url"`
+	MetaTags             map[string]string `json:"meta_tags"`
+	LoadTime             string            `json:"load_time"`
+	IsBlockedByRobotsTxt bool              `json:"is_blocked_by_robots_txt"`
+	ContentHash          string            `json:"content_hash"`
+}
+
+var (
+	results      []PageResult // Зберігаємо результати перевірок
+	resultsMutex sync.Mutex   // Для потокобезпечного доступу
 )
 
 // ProcessURLSet обробляє список URL-адрес
@@ -32,10 +51,7 @@ func ProcessURLSet(ctx context.Context, urlset *parser.URLSet, wg *sync.WaitGrou
 				defer func() { <-sem }()
 
 				// Перевірка robots.txt
-				if !CheckRobotsTxt(ctx, url.Loc) {
-					wg.Done()
-					return
-				}
+				isAllowed := CheckRobotsTxt(ctx, url.Loc)
 
 				// Завантажуємо сторінку з вимірюванням часу
 				resp, redirects, loadTime, err := fetcher.FetchPageWithTiming(ctx, url.Loc, cfg.MaxRedirects)
@@ -63,24 +79,62 @@ func ProcessURLSet(ctx context.Context, urlset *parser.URLSet, wg *sync.WaitGrou
 				}
 
 				// Перевірка на дублі контенту
-				CheckContentDuplicates(string(body), contentHashes, url.Loc)
+				contentHash := CheckContentDuplicates(string(body), contentHashes, url.Loc)
 
-				// Перевірка статус-коду
-				CheckStatusCode(resp)
+				// Збір даних про сторінку
+				pageResult := PageResult{
+					URL:                  url.Loc,
+					StatusCode:           resp.StatusCode,
+					Redirects:            redirects,
+					CanonicalURL:         extractCanonicalURL(string(body)),
+					MetaTags:             extractMetaTags(string(body)),
+					LoadTime:             loadTime.String(),
+					IsBlockedByRobotsTxt: !isAllowed,
+					ContentHash:          contentHash,
+				}
 
-				// Перевірка редіректів
-				CheckRedirects(redirects, url.Loc)
-
-				// Перевірка канонічного посилання
-				CheckCanonicalLink(resp)
-
-				// Перевірка метатегів
-				CheckMetaTags(resp)
+				// Зберігаємо результат
+				resultsMutex.Lock()
+				results = append(results, pageResult)
+				resultsMutex.Unlock()
 
 				wg.Done()
 			}(url)
 		}
 	}
+}
+
+// extractCanonicalURL витягує канонічне посилання з HTML
+func extractCanonicalURL(html string) string {
+	if strings.Contains(html, `<link rel="canonical"`) {
+		// Проста реалізація для прикладу
+		start := strings.Index(html, `href="`) + 6
+		end := strings.Index(html[start:], `"`) + start
+		return html[start:end]
+	}
+	return ""
+}
+
+// extractMetaTags витягує мета-теги з HTML
+func extractMetaTags(html string) map[string]string {
+	metaTags := make(map[string]string)
+
+	// Вилучення тегу <title>
+	if titleStart := strings.Index(html, "<title>"); titleStart != -1 {
+		titleEnd := strings.Index(html[titleStart:], "</title>")
+		if titleEnd != -1 {
+			metaTags["title"] = html[titleStart+7 : titleStart+titleEnd]
+		}
+	}
+
+	// Вилучення мета-тегу description
+	if descStart := strings.Index(html, `<meta name="description"`); descStart != -1 {
+		contentStart := strings.Index(html[descStart:], `content="`) + descStart + 9
+		contentEnd := strings.Index(html[contentStart:], `"`) + contentStart
+		metaTags["description"] = html[contentStart:contentEnd]
+	}
+
+	return metaTags
 }
 
 // CheckRobotsTxt перевіряє, чи сторінка дозволена в robots.txt
@@ -110,13 +164,14 @@ func CheckPageLoadTime(pageURL string, loadTime time.Duration, threshold time.Du
 }
 
 // CheckContentDuplicates перевіряє наявність дублів контенту
-func CheckContentDuplicates(content string, contentHashes map[string]string, pageURL string) {
+func CheckContentDuplicates(content string, contentHashes map[string]string, pageURL string) string {
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
 	if existingURL, exists := contentHashes[hash]; exists {
 		logger.Error("дубль контенту: %s та %s", pageURL, existingURL)
 	} else {
 		contentHashes[hash] = pageURL
 	}
+	return hash
 }
 
 // CheckStatusCode перевіряє статус-код сторінки
@@ -219,4 +274,24 @@ func ProcessSitemapIndex(ctx context.Context, sitemapIndex *parser.SitemapIndex,
 			}(sitemap)
 		}
 	}
+}
+
+// SaveResultsToJSON зберігає результати у JSON-файл
+func SaveResultsToJSON(filename string) error {
+	resultsMutex.Lock()
+	defer resultsMutex.Unlock()
+
+	file, err := os.Create(filename)
+	if err != nil {
+		return fmt.Errorf("помилка при створенні файлу: %v", err)
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(results); err != nil {
+		return fmt.Errorf("помилка при записі JSON: %v", err)
+	}
+
+	return nil
 }

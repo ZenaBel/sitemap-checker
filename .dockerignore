@@ -105,3 +105,4 @@ go.work.sum
 .env
 
 *.log
+*.json

@@ -63,5 +63,11 @@ func main() {
 	}
 
 	wg.Wait()
+
+	// Зберігаємо результати у JSON-файл
+	if err := checker.SaveResultsToJSON("results.json"); err != nil {
+		logger.Error("Помилка при збереженні результатів: %v", err)
+	}
+
 	logger.Info("Перевірка завершена.")
 }

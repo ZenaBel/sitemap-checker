@@ -9,4 +9,9 @@ RUN go mod download
 COPY . .
 RUN go build -o /app/cmd/sitemap-checker/sitemap-checker /app/cmd/sitemap-checker/main.go
 
-CMD ["/app/cmd/sitemap-checker/sitemap-checker"]
+FROM alpine:3.20
+LABEL authors="nitro"
+
+COPY --from=builder /app/cmd/sitemap-checker/sitemap-checker /sitemap-checker
+
+CMD ["/sitemap-checker"]

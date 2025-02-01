@@ -8,8 +8,9 @@ services:
     env_file:
       - .env
     volumes:
-      - ./.env:/app/.env
-      - ./errors.log:/app/errors.log
+      - ./.env:/.env
+      - ./errors.log:/errors.log
+      - ./results.json:/results.json
     networks:
       - app-network
 

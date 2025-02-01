@@ -19,20 +19,41 @@ Sitemap Checker — це інструмент для перевірки стор
 
 3. Запустіть додаток:
    ```bash
-   go run main.go
+   make run
    ```
 
 Або використовуйте Docker:
 
 1. Зберіть Docker-образ:
    ```bash
-   docker compose build
+   make docker-build
    ```
 
 2. Запустіть контейнери:
    ```bash
-   docker compose up
+   make docker-up
    ```
+
+3. Перегляньте логи контейнера:
+   ```bash
+   make logs
+   ```
+
+4. Зупиніть контейнери:
+   ```bash
+   make docker-down
+   ```
+
+5. Очистіть проєкт (видаліть бінарники, логи та контейнери):
+   ```bash
+   make clean
+   ```
+
+Для отримання додаткової інформації використовуйте:
+```bash
+make help
+```
+
 ## Usage/Examples
 
 Після запуску додаток проаналізує `sitemap.xml` і перевірить кожну сторінку. Результати будуть збережені у файлі `results.json`. Приклад виводу:
@@ -70,6 +91,7 @@ MAX_REDIRECTS=5
 # Налаштування Redis
 REDIS_URL=redis:6379
 ```
+
 ## License
 
-Цей проект ліцензовано за умовами [MIT License](https://choosealicense.com/licenses/mit/).
+Цей проєкт ліцензовано за умовами [MIT License](https://choosealicense.com/licenses/mit/).

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -174,57 +173,6 @@ func CheckContentDuplicates(content string, contentHashes map[string]string, pag
 	return hash
 }
 
-// CheckStatusCode перевіряє статус-код сторінки
-func CheckStatusCode(resp *http.Response) {
-	if resp.StatusCode != http.StatusOK {
-		logger.Error("неправильний статус-код: %d для URL: %s", resp.StatusCode, resp.Request.URL)
-	}
-}
-
-// CheckRedirects перевіряє редіректи
-func CheckRedirects(redirects []string, originalURL string) {
-	if len(redirects) > 0 {
-		logger.Error("редіректи для URL %s: %v", originalURL, redirects)
-	} else {
-		logger.Info("редіректи відсутні для URL: %s", originalURL)
-	}
-}
-
-// CheckCanonicalLink перевіряє канонічне посилання
-func CheckCanonicalLink(resp *http.Response) {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error("помилка при читанні тіла відповіді: %v", err)
-		return
-	}
-
-	// Шукаємо канонічне посилання
-	if strings.Contains(string(body), `<link rel="canonical"`) {
-		logger.Info("канонічне посилання знайдено для URL: %s", resp.Request.URL)
-	} else {
-		logger.Error("канонічне посилання відсутнє для URL: %s", resp.Request.URL)
-	}
-}
-
-// CheckMetaTags перевіряє мета-теги
-func CheckMetaTags(resp *http.Response) {
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Error("помилка при читанні тіла відповіді: %v", err)
-		return
-	}
-
-	// Перевірка наявності тегу <title>
-	if !strings.Contains(string(body), "<title>") {
-		logger.Error("тег <title> відсутній для URL: %s", resp.Request.URL)
-	}
-
-	// Перевірка наявності метатегу description
-	if !strings.Contains(string(body), `<meta name="description"`) {
-		logger.Error("мета-тег description відсутній для URL: %s", resp.Request.URL)
-	}
-}
-
 // ProcessSitemapIndex обробляє вкладені файли sitemap
 func ProcessSitemapIndex(ctx context.Context, sitemapIndex *parser.SitemapIndex, depth int, wg *sync.WaitGroup, sem chan struct{}, cfg *config.Config, contentHashes map[string]string) {
 	defer wg.Done()
@@ -285,7 +233,12 @@ func SaveResultsToJSON(filename string) error {
 	if err != nil {
 		return fmt.Errorf("помилка при створенні файлу: %v", err)
 	}
-	defer file.Close()
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+			logger.Error("помилка при закритті файлу: %v", err)
+		}
+	}(file)
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")

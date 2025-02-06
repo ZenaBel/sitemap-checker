@@ -114,7 +114,6 @@ func FetchRobotsTxt(ctx context.Context, pageURL string) ([]byte, error) {
 	if redisClient != nil {
 		cachedRobotsTxt, err := redisClient.Get(ctx, robotsURL).Bytes()
 		if err == nil {
-			logger.Info("robots.txt знайдено в кеші для: %s", robotsURL)
 			return cachedRobotsTxt, nil
 		}
 	}
@@ -122,7 +121,6 @@ func FetchRobotsTxt(ctx context.Context, pageURL string) ([]byte, error) {
 	// Якщо Redis недоступний, використовуємо тимчасовий файл
 	tempFile := fmt.Sprintf("/tmp/robots_%x.txt", sha256.Sum256([]byte(robotsURL)))
 	if data, err := os.ReadFile(tempFile); err == nil {
-		logger.Info("robots.txt знайдено в тимчасовому файлі для: %s", robotsURL)
 		return data, nil
 	}
 

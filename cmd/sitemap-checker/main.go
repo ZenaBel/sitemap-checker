@@ -48,17 +48,14 @@ func main() {
 	sem := make(chan struct{}, cfg.MaxGoroutines)
 	var wg sync.WaitGroup
 
-	// Мапа для зберігання хешів контенту
-	contentHashes := make(map[string]string)
-
 	// Обробка вмісту sitemap
 	switch content := sitemapContent.(type) {
 	case *parser.URLSet:
 		wg.Add(1)
-		checker.ProcessURLSet(ctx, content, &wg, sem, cfg, contentHashes)
+		checker.ProcessURLSet(ctx, content, &wg, sem, cfg)
 	case *parser.SitemapIndex:
 		wg.Add(1)
-		checker.ProcessSitemapIndex(ctx, content, 1, &wg, sem, cfg, contentHashes)
+		checker.ProcessSitemapIndex(ctx, content, 1, &wg, sem, cfg)
 	default:
 		logger.Error("Невідомий тип вмісту sitemap")
 	}

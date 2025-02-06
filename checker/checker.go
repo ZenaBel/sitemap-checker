@@ -31,11 +31,14 @@ type PageResult struct {
 
 var (
 	results      []PageResult // Зберігаємо результати перевірок
-	resultsMutex sync.Mutex   // Для потокобезпечного доступу
+	resultsMutex sync.Mutex   // Для потокобезпечного доступу до results
+
+	contentHashes = make(map[string]string) // Мапа для зберігання хешів контенту
+	hashMutex     sync.Mutex                // Для потокобезпечного доступу до contentHashes
 )
 
 // ProcessURLSet обробляє список URL-адрес
-func ProcessURLSet(ctx context.Context, urlset *parser.URLSet, wg *sync.WaitGroup, sem chan struct{}, cfg *config.Config, contentHashes map[string]string) {
+func ProcessURLSet(ctx context.Context, urlset *parser.URLSet, wg *sync.WaitGroup, sem chan struct{}, cfg *config.Config) {
 	defer wg.Done()
 
 	for _, url := range urlset.URLs {
@@ -78,7 +81,7 @@ func ProcessURLSet(ctx context.Context, urlset *parser.URLSet, wg *sync.WaitGrou
 				}
 
 				// Перевірка на дублі контенту
-				contentHash := CheckContentDuplicates(string(body), contentHashes, url.Loc)
+				contentHash := CheckContentDuplicates(string(body), url.Loc)
 
 				// Збір даних про сторінку
 				pageResult := PageResult{
@@ -163,8 +166,12 @@ func CheckPageLoadTime(pageURL string, loadTime time.Duration, threshold time.Du
 }
 
 // CheckContentDuplicates перевіряє наявність дублів контенту
-func CheckContentDuplicates(content string, contentHashes map[string]string, pageURL string) string {
+func CheckContentDuplicates(content string, pageURL string) string {
 	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+
+	hashMutex.Lock()
+	defer hashMutex.Unlock()
+
 	if existingURL, exists := contentHashes[hash]; exists {
 		logger.Error("дубль контенту: %s та %s", pageURL, existingURL)
 	} else {
@@ -174,7 +181,7 @@ func CheckContentDuplicates(content string, contentHashes map[string]string, pag
 }
 
 // ProcessSitemapIndex обробляє вкладені файли sitemap
-func ProcessSitemapIndex(ctx context.Context, sitemapIndex *parser.SitemapIndex, depth int, wg *sync.WaitGroup, sem chan struct{}, cfg *config.Config, contentHashes map[string]string) {
+func ProcessSitemapIndex(ctx context.Context, sitemapIndex *parser.SitemapIndex, depth int, wg *sync.WaitGroup, sem chan struct{}, cfg *config.Config) {
 	defer wg.Done()
 
 	if depth > cfg.MaxDepth {
@@ -211,10 +218,10 @@ func ProcessSitemapIndex(ctx context.Context, sitemapIndex *parser.SitemapIndex,
 				switch content := sitemapContent.(type) {
 				case *parser.URLSet:
 					wg.Add(1)
-					ProcessURLSet(ctx, content, wg, sem, cfg, contentHashes)
+					ProcessURLSet(ctx, content, wg, sem, cfg)
 				case *parser.SitemapIndex:
 					wg.Add(1)
-					ProcessSitemapIndex(ctx, content, depth+1, wg, sem, cfg, contentHashes)
+					ProcessSitemapIndex(ctx, content, depth+1, wg, sem, cfg)
 				default:
 					logger.Error("невідомий тип вмісту sitemap: %s", sitemap.Loc)
 				}
